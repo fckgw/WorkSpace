@@ -6,15 +6,22 @@ error_reporting(E_ALL);
 
 
 <?php
+
+// Se o usuário já está logado, ele SEMPRE cai no Portal de Aplicativos
+
+/**
+ * ROTEADOR PRINCIPAL - CENTRAL DE ACESSO
+ */
 session_start();
 
-// Se a sessão existir, manda para o Dashboard
+// Se o usuário estiver logado, ele é enviado para o Portal de Aplicativos
 if (isset($_SESSION['usuario_id'])) {
-    header("Location: dashboard.php");
+    header("Location: portal.php");
     exit;
 } else {
-    // Caso contrário, manda para o Login
+    // Caso contrário, ele deve realizar o login
     header("Location: login.php");
     exit;
 }
+
 ?>

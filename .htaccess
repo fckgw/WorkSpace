@@ -1,2 +1,8 @@
 DirectoryIndex index.php login.php
 Options -Indexes
+
+# Previne acesso direto a pastas de sistema
+<Files "config.php">
+    Order Deny,Allow
+    Deny from all
+</Files>
