@@ -1,157 +1,153 @@
 <?php
 /**
- * BDSoft Workspace - MOTOR DE AÇÕES DO MÓDULO DE PROJETOS
+ * BDSoft Workspace - PROJETOS / ACOES
  * Local: projetos/acoes.php
  */
-
-// 1. Configurações de Depuração para ambiente de produção
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-// 2. Aumentar limites para processamento de imagens e tempo de execução
-set_time_limit(1200); 
-ini_set('memory_limit', '512M');
-
 session_start();
+require_once '../config.php';
 
-// 3. Importar conexão com o banco de dados
-require_once __DIR__ . '/../config.php';
-
-// 4. Verificação de Segurança de Sessão
-if (!isset($_SESSION['usuario_id'])) {
-    http_response_code(403);
-    exit("Erro: Sua sessão expirou. Por favor, realize o login novamente.");
+if (!isset($_SESSION['usuario_id'])) { 
+    exit("Sessão expirada. Faça login novamente."); 
 }
 
 $user_id_sessao = $_SESSION['usuario_id'];
-$user_nivel_sessao = $_SESSION['usuario_nivel']; // 'admin' ou 'usuario'
+$user_nivel = $_SESSION['usuario_nivel'] ?? 'usuario';
 
 try {
-    
-    // --- AÇÃO: BUSCAR EVIDÊNCIA (GET) ---
-    if (isset($_GET['acao']) && $_GET['acao'] === 'get_evidencia') {
-        $id_tarefa = (int)$_GET['id'];
-        $stmt_ev = $pdo->prepare("SELECT evidencias FROM tarefas_projetos WHERE id = ?");
-        $stmt_ev->execute([$id_tarefa]);
-        echo $stmt_ev->fetchColumn() ?: "";
-        exit;
-    }
+    // --- 1. BUSCAR TODA A TIMELINE DA TAREFA (GET) ---
+    if (isset($_GET['acao']) && $_GET['acao'] === 'get_updates') {
+        $id_task = (int)$_GET['id'];
+        
+        $sql = "SELECT u.*, us.nome as autor 
+                FROM tarefas_updates u 
+                INNER JOIN usuarios us ON u.usuario_id = us.id 
+                WHERE u.tarefa_id = ? 
+                ORDER BY u.data_criacao DESC";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$id_task]);
+        $updates = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // --- AÇÃO: EXCLUIR QUADRO COMPLETO (GET) ---
-    if (isset($_GET['acao']) && $_GET['acao'] === 'deletar_quadro_completo') {
-        $id_quadro_del = (int)$_GET['id'];
-        if ($id_quadro_del > 0) {
-            $sql_del_q = "DELETE FROM quadros_projetos WHERE id = ? AND (usuario_id = ? OR ? = 'admin')";
-            $stmt_del_q = $pdo->prepare($sql_del_q);
-            $stmt_del_q->execute([$id_quadro_del, $user_id_sessao, $user_nivel_sessao]);
+        if (empty($updates)) {
+            echo "<div class='text-center text-muted my-5'><i class='fas fa-comments fa-3x mb-3 opacity-25'></i><p>Nenhuma atualização registrada ainda.</p></div>";
+        } else {
+            foreach ($updates as $up) {
+                $data = date('d/m/Y H:i', strtotime($up['data_criacao']));
+                $pode_gerenciar = ($up['usuario_id'] == $user_id_sessao || $user_nivel === 'admin');
+                
+                echo "
+                <div class='card mb-3 shadow-sm border-0' id='card_update_{$up['id']}' style='border-radius:15px; background:#fff;'>
+                    <div class='card-header bg-white border-0 d-flex justify-content-between align-items-center pt-3 px-3'>
+                        <div>
+                            <span class='fw-bold text-primary'><i class='fas fa-user-circle me-1'></i> {$up['autor']}</span>
+                            <small class='text-muted ms-2' style='font-size:11px;'>$data</small>
+                        </div>";
+                
+                if ($pode_gerenciar) {
+                    echo "
+                        <div class='no-print'>
+                            <button class='btn btn-sm btn-light border-0 text-primary me-1' onclick='prepararEdicao({$up['id']})' title='Editar'><i class='fas fa-edit'></i></button>
+                            <button class='btn btn-sm btn-light border-0 text-danger' onclick='excluirUpdate({$up['id']})' title='Excluir'><i class='fas fa-trash-alt'></i></button>
+                        </div>";
+                }
+                
+                echo "
+                    </div>
+                    <div class='card-body px-3 pb-3 pt-1' id='conteudo_update_{$up['id']}' style='font-size:14px; color:#444; line-height:1.6;'>
+                        {$up['conteudo']}
+                    </div>
+                </div>";
+            }
         }
-        header("Location: index.php");
         exit;
     }
 
-    // --- AÇÃO: EXCLUIR GRUPO (GET) ---
-    if (isset($_GET['del_grupo'])) {
-        $id_grupo_del = (int)$_GET['del_grupo'];
-        $id_quadro_ref = (int)$_GET['quadro_id'];
-        if ($id_grupo_del > 0) {
-            $pdo->beginTransaction();
-            $pdo->prepare("DELETE FROM tarefas_projetos WHERE grupo_id = ?")->execute([$id_grupo_del]);
-            $pdo->prepare("DELETE FROM projetos_grupos WHERE id = ?")->execute([$id_grupo_del]);
-            $pdo->commit();
-        }
-        header("Location: quadro.php?id=" . $id_quadro_ref);
+    // --- 2. EXCLUIR UM COMENTÁRIO DA TIMELINE (GET) ---
+    if (isset($_GET['acao']) && $_GET['acao'] === 'excluir_update') {
+        $id_up = (int)$_GET['id_update'];
+        $stmt = $pdo->prepare("DELETE FROM tarefas_updates WHERE id = ? AND (usuario_id = ? OR ? = 'admin')");
+        $stmt->execute([$id_up, $user_id_sessao, $user_nivel]);
+        echo "Sucesso";
         exit;
     }
 
-    // --- AÇÃO: EXCLUIR TAREFA (GET) ---
-    if (isset($_GET['excluir_tarefa'])) {
-        $id_tarefa_del = (int)$_GET['excluir_tarefa'];
-        $id_quadro_ref = (int)$_GET['id_quadro'];
-        if ($id_tarefa_del > 0) {
-            $pdo->prepare("DELETE FROM tarefas_projetos WHERE id = ?")->execute([$id_tarefa_del]);
-        }
-        header("Location: quadro.php?id=" . $id_quadro_ref);
-        exit;
-    }
-
-    // --- PROCESSAMENTO DE REQUISIÇÕES VIA POST ---
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $acao = $_POST['acao'] ?? '';
 
-        // --- EDITAR NOME DO QUADRO ---
-        if ($acao === 'editar_nome_quadro') {
-            $stmt = $pdo->prepare("UPDATE quadros_projetos SET nome = ? WHERE id = ? AND (usuario_id = ? OR ? = 'admin')");
-            $stmt->execute([trim($_POST['nome']), (int)$_POST['id'], $user_id_sessao, $user_nivel_sessao]);
-            echo "Sucesso"; exit;
+        // --- 3. SALVAR OU ATUALIZAR COMENTÁRIO ---
+        if ($acao === 'salvar_update') {
+            $id_task = (int)$_POST['id'];
+            $id_update = isset($_POST['update_id']) ? (int)$_POST['update_id'] : 0;
+            $conteudo = $_POST['conteudo'];
+
+            if ($id_update > 0) {
+                $stmt = $pdo->prepare("UPDATE tarefas_updates SET conteudo = ? WHERE id = ? AND (usuario_id = ? OR ? = 'admin')");
+                $stmt->execute([$conteudo, $id_update, $user_id_sessao, $user_nivel]);
+                echo "Atualizado";
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO tarefas_updates (tarefa_id, usuario_id, conteudo, data_criacao) VALUES (?, ?, ?, NOW())");
+                $stmt->execute([$id_task, $user_id_sessao, $conteudo]);
+                echo "Criado";
+            }
+            exit;
         }
 
-        // --- CRIAR NOVO GRUPO ---
+        // --- 4. NOVO GRUPO (SPRINT) ---
         if ($acao === 'novo_grupo') {
-            $nome_g = trim($_POST['nome_grupo']);
+            $nome = trim($_POST['nome_grupo']);
             $id_q = (int)$_POST['quadro_id'];
-            $cor_g = $_POST['cor'] ?? '#1a73e8';
-            if (!empty($nome_g)) {
+            $cor = $_POST['cor'] ?? '#1a73e8';
+
+            if (!empty($nome) && $id_q > 0) {
                 $stmt = $pdo->prepare("INSERT INTO projetos_grupos (nome, quadro_id, cor) VALUES (?, ?, ?)");
-                $stmt->execute([$nome_g, $id_q, $cor_g]);
+                $stmt->execute([$nome, $id_q, $cor]);
             }
-            header("Location: quadro.php?id=" . $id_q); exit;
+            header("Location: quadro.php?id=" . $id_q);
+            exit;
         }
 
-        // --- CRIAR NOVO QUADRO (WORKSPACE) ---
-        if ($acao === 'criar_quadro') {
-            $nome_q = trim($_POST['nome']);
-            $tipo_q = ((int)$_POST['privado'] === 1) ? 'Privado' : 'Publico';
-            $pdo->beginTransaction();
-            $stmt_ins_q = $pdo->prepare("INSERT INTO quadros_projetos (nome, tipo, usuario_id, data_criacao) VALUES (?, ?, ?, NOW())");
-            $stmt_ins_q->execute([$nome_q, $tipo_q, $user_id_sessao]);
-            $id_gerado = $pdo->lastInsertId();
-
-            // Status Padrão (Incluindo Agarrado e Pausado)
-            $status_padrao = [
-                ['Novo','#c4c4c4'], ['Trabalhando','#fdab3d'], ['Agarrado','#a25ddc'], 
-                ['Pausado','#797e93'], ['Travado','#e44258'], ['Concluído','#00ca72']
-            ];
-            foreach($status_padrao as $s) {
-                $pdo->prepare("INSERT INTO quadros_status (quadro_id, label, cor) VALUES (?,?,?)")->execute([$id_gerado, $s[0], $s[1]]);
-            }
-            $pdo->prepare("INSERT INTO projetos_grupos (nome, quadro_id, cor) VALUES ('Minhas Tarefas', ?, '#1a73e8')")->execute([$id_gerado]);
-            $pdo->prepare("INSERT INTO quadro_membros (quadro_id, usuario_id) VALUES (?, ?)")->execute([$id_gerado, $user_id_sessao]);
-            $pdo->commit();
-            header("Location: index.php"); exit;
-        }
-
-        // --- ADICIONAR NOVA TAREFA ---
+        // --- 5. NOVA TAREFA ---
         if ($acao === 'nova_tarefa') {
             $qid = (int)$_POST['quadro_id'];
+            $gid = (int)$_POST['grupo_id'];
+            $tit = trim($_POST['titulo']);
+
             $stmt_st = $pdo->prepare("SELECT id FROM quadros_status WHERE quadro_id = ? ORDER BY id ASC LIMIT 1");
             $stmt_st->execute([$qid]);
             $st_id = $stmt_st->fetchColumn();
+
             $stmt = $pdo->prepare("INSERT INTO tarefas_projetos (titulo, grupo_id, quadro_id, usuario_id, status_id) VALUES (?, ?, ?, ?, ?)");
-            $stmt->execute([trim($_POST['titulo']), (int)$_POST['grupo_id'], $qid, $user_id_sessao, $st_id]);
+            $stmt->execute([$tit, $gid, $qid, $user_id_sessao, $st_id]);
             echo "Sucesso"; exit;
         }
 
-        // --- ATUALIZAR CAMPO TAREFA ---
+        // --- 6. ATUALIZAR TAREFA OU GRUPO ---
         if ($acao === 'atualizar_campo_tarefa') {
             $pdo->prepare("UPDATE tarefas_projetos SET {$_POST['campo']} = ? WHERE id = ?")->execute([$_POST['valor'], (int)$_POST['id']]);
             echo "Sucesso"; exit;
         }
-
-        // --- ATUALIZAR CAMPO GRUPO ---
         if ($acao === 'atualizar_campo_grupo') {
             $pdo->prepare("UPDATE projetos_grupos SET {$_POST['campo']} = ? WHERE id = ?")->execute([$_POST['valor'], (int)$_POST['id']]);
             echo "Sucesso"; exit;
         }
-
-        // --- SALVAR EVIDÊNCIAS ---
-        if ($acao === 'salvar_evidencia') {
-            $pdo->prepare("UPDATE tarefas_projetos SET evidencias = ? WHERE id = ?")->execute([$_POST['conteudo'], (int)$_POST['id']]);
-            echo "Sucesso"; exit;
-        }
     }
-} catch (Exception $e) {
-    if ($pdo->inTransaction()) { $pdo->rollBack(); }
-    http_response_code(500);
-    die("Erro: " . $e->getMessage());
+
+    // --- 7. EXCLUSÕES GERAIS ---
+    if (isset($_GET['del_grupo'])) {
+        $id_g = (int)$_GET['del_grupo'];
+        $id_q = (int)$_GET['quadro_id'];
+        $pdo->prepare("DELETE FROM tarefas_projetos WHERE grupo_id = ?")->execute([$id_g]);
+        $pdo->prepare("DELETE FROM projetos_grupos WHERE id = ?")->execute([$id_g]);
+        header("Location: quadro.php?id=" . $id_q); exit;
+    }
+    if (isset($_GET['excluir_tarefa'])) {
+        $pdo->prepare("DELETE FROM tarefas_projetos WHERE id = ?")->execute([(int)$_GET['excluir_tarefa']]);
+        header("Location: quadro.php?id=" . $_GET['id_quadro']); exit;
+    }
+
+} catch (Exception $e) { 
+    die("<h1>Erro</h1><p>" . $e->getMessage() . "</p><a href='index.php'>Voltar</a>"); 
 }
